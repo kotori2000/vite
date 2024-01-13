@@ -48,7 +48,9 @@ export function transformMiddleware(
   server: ViteDevServer,
 ): Connect.NextHandleFunction {
   // Keep the named function. The name is visible in debug logs via `DEBUG=connect:dispatcher ...`
+  // 保留已命名的函数。通过 `DEBUG=connect:dispatcher ...`，该名称在调试日志中可见。
   return async function viteTransformMiddleware(req, res, next) {
+    // 跳过favicon.ico的请求处理
     if (req.method !== 'GET' || knownIgnoreList.has(req.url!)) {
       return next()
     }
@@ -203,7 +205,7 @@ export function transformMiddleware(
         if (result) {
           const depsOptimizer = getDepsOptimizer(server.config, false) // non-ssr
           const type = isDirectCSSRequest(url) ? 'css' : 'js'
-          const isDep =
+          const isDep = // 资源有版本号或者三方依赖，则命中强缓存
             DEP_VERSION_RE.test(url) || depsOptimizer?.isOptimizedDepUrl(url)
           let originalContent: string | undefined
           if (type === 'js' && result.map == null) {

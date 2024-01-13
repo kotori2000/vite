@@ -638,6 +638,7 @@ export async function _createServer(
 
   const onFileAddUnlink = async (file: string, isUnlink: boolean) => {
     file = normalizePath(file)
+    // 监视文件的创建或删除
     await container.watchChange(file, { event: isUnlink ? 'delete' : 'create' })
     await handleFileAddUnlink(file, server, isUnlink)
     await onHMRUpdate(file, true)
@@ -645,6 +646,7 @@ export async function _createServer(
 
   watcher.on('change', async (file) => {
     file = normalizePath(file)
+    // 监视文件的更新
     await container.watchChange(file, { event: 'update' })
     // invalidate module graph cache on file change
     moduleGraph.onFileChange(file)
@@ -717,10 +719,13 @@ export async function _createServer(
   }
 
   // open in editor support
+  // 支持在编辑器中打开
   middlewares.use('/__open-in-editor', launchEditorMiddleware())
 
   // ping request handler
   // Keep the named function. The name is visible in debug logs via `DEBUG=connect:dispatcher ...`
+  // ping 请求处理程序
+  // 保留命名函数。通过 `DEBUG=connect:dispatcher ...`，该名称在调试日志中可见。
   middlewares.use(function viteHMRPingMiddleware(req, res, next) {
     if (req.headers['accept'] === 'text/x-vite-ping') {
       res.writeHead(204).end()
@@ -732,6 +737,9 @@ export async function _createServer(
   // serve static files under /public
   // this applies before the transform middleware so that these files are served
   // as-is without transforms.
+  // 在 /public 下提供静态文件
+  // 这将在转换中间件之前应用，这样这些文件就可以
+  // 无需转换。
   if (config.publicDir) {
     middlewares.use(servePublicMiddleware(server))
   }
@@ -751,6 +759,9 @@ export async function _createServer(
   // run post config hooks
   // This is applied before the html middleware so that user middleware can
   // serve custom content instead of index.html.
+  // 运行后配置钩子
+  // 这将在 html 中间件之前应用，以便用户中间件可以
+  // 提供自定义内容，而不是 index.html。
   postHooks.forEach((fn) => fn && fn())
 
   if (config.appType === 'spa' || config.appType === 'mpa') {
@@ -767,6 +778,9 @@ export async function _createServer(
   // httpServer.listen can be called multiple times
   // when port when using next port number
   // this code is to avoid calling buildStart multiple times
+  // httpServer.listen 可被多次调用
+  // 当使用下一个端口号时
+  // 此代码是为了避免多次调用 buildStart
   let initingServer: Promise<void> | undefined
   let serverInited = false
   const initServer = async () => {
@@ -776,6 +790,7 @@ export async function _createServer(
     initingServer = (async function () {
       await container.buildStart({})
       // start deps optimizer after all container plugins are ready
+      // 在所有容器插件准备就绪后启动部署优化器
       if (isDepsOptimizerEnabled(config, false)) {
         await initDepsOptimizer(config, server)
       }

@@ -69,6 +69,7 @@ const filterDuplicateOptions = <T extends object>(options: T) => {
 }
 /**
  * removing global flags before passing as command specific sub-configs
+ * 先移除全局标志，再将其作为特定于命令的子配置文件
  */
 function cleanOptions<Options extends GlobalCLIOptions>(
   options: Options,

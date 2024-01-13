@@ -1,6 +1,6 @@
 import a from './a.js'
 
-const val = `b0,${a}`
+const val = `b0,${a}-bbbb12`
 document.querySelector('.importing-reloaded').innerHTML += `b.js: ${val}<br>`
 
 if (import.meta.hot) {

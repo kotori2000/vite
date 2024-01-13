@@ -1,4 +1,4 @@
-const val = 'a0'
+const val = 'a02'
 document.querySelector('.importing-reloaded').innerHTML += `a.js: ${val}<br>`
 
 export default val

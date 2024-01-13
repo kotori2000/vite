@@ -141,7 +141,6 @@ export async function handleHMRUpdate(
 
   updateModules(shortFile, hmrContext.modules, timestamp, server)
 }
-
 type HasDeadEnd = boolean | string
 export function updateModules(
   file: string,
@@ -154,7 +153,6 @@ export function updateModules(
   const invalidatedModules = new Set<ModuleNode>()
   const traversedModules = new Set<ModuleNode>()
   let needFullReload: HasDeadEnd = false
-
   for (const mod of modules) {
     const boundaries: { boundary: ModuleNode; acceptedVia: ModuleNode }[] = []
     const hasDeadEnd = propagateUpdate(mod, traversedModules, boundaries)
@@ -164,26 +162,23 @@ export function updateModules(
     if (needFullReload) {
       continue
     }
-
     if (hasDeadEnd) {
       needFullReload = hasDeadEnd
       continue
     }
-
     updates.push(
       ...boundaries.map(({ boundary, acceptedVia }) => ({
-        type: `${boundary.type}-update` as const,
-        timestamp,
-        path: normalizeHmrUrl(boundary.url),
+        type: `${boundary.type}-update` as const, // 更新类型 js/css
+        timestamp, // 时间戳
+        path: normalizeHmrUrl(boundary.url), // 导入该模块的模块
         explicitImportRequired:
           boundary.type === 'js'
             ? isExplicitImportRequired(acceptedVia.url)
             : undefined,
-        acceptedPath: normalizeHmrUrl(acceptedVia.url),
+        acceptedPath: normalizeHmrUrl(acceptedVia.url), // 当前模块
       })),
     )
   }
-
   if (needFullReload) {
     const reason =
       typeof needFullReload === 'string'
@@ -198,12 +193,10 @@ export function updateModules(
     })
     return
   }
-
   if (updates.length === 0) {
     debugHmr?.(colors.yellow(`no update happened `) + colors.dim(file))
     return
   }
-
   config.logger.info(
     colors.green(`hmr update `) +
       colors.dim([...new Set(updates.map((u) => u.path))].join(', ')),
@@ -224,6 +217,7 @@ export async function handleFileAddUnlink(
 
   if (isUnlink) {
     for (const deletedMod of modules) {
+      // importedModules 当前模块依赖哪些模块
       deletedMod.importedModules.forEach((importedMod) => {
         importedMod.importers.delete(deletedMod)
       })
@@ -265,9 +259,9 @@ function propagateUpdate(
   }
   traversedModules.add(node)
 
-  // #7561
-  // if the imports of `node` have not been analyzed, then `node` has not
-  // been loaded in the browser and we should stop propagation.
+  // #7561 issue地址https://github.com/vitejs/vite/pull/7561
+  // 修复bug，如果这个模块是动态引入并且永远不会被引入，也就不会经过importAnalysis处理，同杨该模块也需要跳过热更新的处理
+  // 否则，HMR 信号会触发错误的整页重新加载。
   if (node.id && node.isSelfAccepting === undefined) {
     debugHmr?.(
       `[propagate update] stop propagation because not analyzed: ${colors.dim(
@@ -282,8 +276,8 @@ function propagateUpdate(
     const result = isNodeWithinCircularImports(node, currentChain)
     if (result) return result
 
-    // additionally check for CSS importers, since a PostCSS plugin like
-    // Tailwind JIT may register any file as a dependency to a CSS file.
+    // 另外检查 CSS 导入器，因为像这样的 PostCSS 插件
+    // Tailwind JIT 可以将任何文件注册为 CSS 文件的依赖项。
     for (const importer of node.importers) {
       if (isCSSRequest(importer.url) && !currentChain.includes(importer)) {
         propagateUpdate(
@@ -303,18 +297,19 @@ function propagateUpdate(
   // are used outside of me".
   // Also, the imported module (this one) must be updated before the importers,
   // so that they do get the fresh imported module when/if they are reloaded.
+  // 有接受hmr的导出
   if (node.acceptedHmrExports) {
     boundaries.push({ boundary: node, acceptedVia: node })
     const result = isNodeWithinCircularImports(node, currentChain)
     if (result) return result
   } else {
+    // 当前模块没有被任何模块导入，返回 true，即全部更新
     if (!node.importers.size) {
       return true
     }
 
     // #3716, #3913
-    // For a non-CSS file, if all of its importers are CSS files (registered via
-    // PostCSS plugins) it should be considered a dead end and force full reload.
+    // 当前模块不是css模块并且有css模块导入了当前模块返回true
     if (
       !isCSSRequest(node.url) &&
       [...node.importers].every((i) => isCSSRequest(i.url))
@@ -326,8 +321,10 @@ function propagateUpdate(
   for (const importer of node.importers) {
     const subChain = currentChain.concat(importer)
 
+    // 当前模块的上层模块接受当前模块的更新加入到boundaries列表中
     if (importer.acceptedHmrDeps.has(node)) {
       boundaries.push({ boundary: importer, acceptedVia: node })
+      // 循环依赖场景处理
       const result = isNodeWithinCircularImports(importer, subChain)
       if (result) return result
       continue
@@ -343,6 +340,7 @@ function propagateUpdate(
       }
     }
 
+    // 递归propagateUpdate处理当前模块的上层模块，确认热更新边界
     if (
       !currentChain.includes(importer) &&
       propagateUpdate(importer, traversedModules, boundaries, subChain)

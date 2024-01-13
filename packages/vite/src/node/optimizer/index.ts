@@ -238,15 +238,21 @@ export async function optimizeDeps(
     return cachedMetadata
   }
 
+  // 扫描收集依赖信息
   const deps = await discoverProjectDependencies(config).result
+
+  log?.('扫描收集的依赖信息-----------deps', deps)
 
   const depsString = depsLogString(Object.keys(deps))
   log?.(colors.green(`Optimizing dependencies:\n  ${depsString}`))
 
+  // 将配置文件中 optimizeDeps.include 选项中指定的依赖添加到 optimizeDeps 的依赖列表中
   await addManuallyIncludedOptimizeDeps(deps, config, ssr)
 
+  // 返回值是对象，key为模块id，value为模块信息
   const depsInfo = toDiscoveredDependencies(config, deps, ssr)
 
+  // 依赖打包逻辑
   const result = await runOptimizeDeps(config, depsInfo).result
 
   await result.commit()
@@ -312,8 +318,8 @@ export function initDepsOptimizerMetadata(
 ): DepOptimizationMetadata {
   const hash = getDepHash(config, ssr)
   return {
-    hash,
-    browserHash: getOptimizedBrowserHash(hash, {}, timestamp),
+    hash, // hash 则是为所有环境计算的
+    browserHash: getOptimizedBrowserHash(hash, {}, timestamp), // browserHash 是专门为浏览器环境计算的,根据hash deps 和时间戳计算出来的
     optimized: {},
     chunks: {},
     discovered: {},
@@ -336,6 +342,8 @@ let firstLoadCachedDepOptimizationMetadata = true
 /**
  * Creates the initial dep optimization metadata, loading it from the deps cache
  * if it exists and pre-bundling isn't forced
+ * 创建初始部署优化元数据，如果存在且未强制预绑定，则从部署缓存中加载
+ * 如果存在且未强制预捆绑
  */
 export async function loadCachedDepOptimizationMetadata(
   config: ResolvedConfig,
@@ -381,6 +389,8 @@ export async function loadCachedDepOptimizationMetadata(
 /**
  * Initial optimizeDeps at server start. Perform a fast scan using esbuild to
  * find deps to pre-bundle and include user hard-coded dependencies
+ * 在服务器启动时初始化 optimizeDeps。使用 esbuild 进行快速扫描，以
+ * 查找预打包的依赖项，并包含用户硬编码的依赖项
  */
 export function discoverProjectDependencies(config: ResolvedConfig): {
   cancel: () => Promise<void>
@@ -429,6 +439,7 @@ export function toDiscoveredDependencies(
       file: getOptimizedDepPath(id, config, ssr),
       src,
       browserHash: browserHash,
+      // 利用es-module-lexer解析文件，可分析出import和export
       exportsData: extractExportsData(src, config, ssr),
     }
   }
@@ -453,45 +464,38 @@ export function runOptimizeDeps(
   result: Promise<DepOptimizationResult>
 } {
   const optimizerContext = { cancelled: false }
-
   const config: ResolvedConfig = {
     ...resolvedConfig,
     command: 'build',
   }
-
+  // 获取缓存目录（root/node_modules/.vite）
   const depsCacheDir = getDepsCacheDir(resolvedConfig, ssr)
+  //临时缓存目录 获取临时缓存目录(.vite/processing-deps)-Vite 会将正在处理的依赖项缓存起来
   const processingCacheDir = getProcessingDepsCacheDir(resolvedConfig, ssr)
-
-  // Create a temporal directory so we don't need to delete optimized deps
-  // until they have been processed. This also avoids leaving the deps cache
-  // directory in a corrupted state if there is an error
+  // 创建一个临时目录，这样我们就不需要删除优化后的 deps
+  // 直到它们被处理完毕。这也避免了在出现错误时目录处于损坏状态。
   fs.mkdirSync(processingCacheDir, { recursive: true })
-
-  // a hint for Node.js
-  // all files in the cache directory should be recognized as ES modules
+  // 给 .vite/deps 缓存目录添加 package.json，因为所有的缓存文件都应被识别为ES模块。
   debug?.(colors.green(`creating package.json in ${processingCacheDir}`))
   fs.writeFileSync(
     path.resolve(processingCacheDir, 'package.json'),
     `{\n  "type": "module"\n}\n`,
   )
-
+  // 初始化metadata
   const metadata = initDepsOptimizerMetadata(config, ssr)
-
+  // 生成依赖项的hash值，浏览器请求会携带browserHash
   metadata.browserHash = getOptimizedBrowserHash(
     metadata.hash,
     depsFromOptimizedDepInfo(depsInfo),
   )
-
-  // We prebundle dependencies with esbuild and cache them, but there is no need
-  // to wait here. Code that needs to access the cached deps needs to await
-  // the optimizedDepInfo.processing promise for each dep
-
   const qualifiedIds = Object.keys(depsInfo)
   let cleaned = false
   let committed = false
   const cleanUp = () => {
     // If commit was already called, ignore the clean up even if a cancel was requested
     // This minimizes the chances of leaving the deps cache in a corrupted state
+    // 如果已调用提交，即使请求取消，也会忽略清理。
+    // 这将最大限度地减少使 deps 缓存处于损坏状态的可能性
     if (!cleaned && !committed) {
       cleaned = true
       // No need to wait, we can clean up in the background because temp folders
@@ -502,7 +506,6 @@ export function runOptimizeDeps(
       })
     }
   }
-
   const successfulResult: DepOptimizationResult = {
     metadata,
     cancel: cleanUp,
@@ -562,7 +565,6 @@ export function runOptimizeDeps(
       }
     },
   }
-
   if (!qualifiedIds.length) {
     // No deps to optimize, we still commit the processing cache dir to remove
     // the previous optimized deps if they exist, and let the next server start
@@ -572,13 +574,11 @@ export function runOptimizeDeps(
       result: Promise.resolve(successfulResult),
     }
   }
-
   const cancelledResult: DepOptimizationResult = {
     metadata,
     commit: async () => cleanUp(),
     cancel: cleanUp,
   }
-
   const start = performance.now()
 
   const preparedRun = prepareEsbuildOptimizerRun(
@@ -623,6 +623,8 @@ export function runOptimizeDeps(
             ...info,
             // We only need to hash the output.imports in to check for stability, but adding the hash
             // and file path gives us a unique hash that may be useful for other things in the future
+            // 我们只需要对 output.imports 进行散列以检查其稳定性，但添加散列值
+            // 和文件路径，就能得到一个唯一的哈希值，将来可能对其他事情有用
             fileHash: getHash(
               metadata.hash +
                 depsInfo[id].file +
@@ -713,34 +715,44 @@ async function prepareEsbuildOptimizerRun(
     ...resolvedConfig,
     command: 'build',
   }
-
   // esbuild generates nested directory output with lowest common ancestor base
   // this is unpredictable and makes it difficult to analyze entry / output
   // mapping. So what we do here is:
   // 1. flatten all ids to eliminate slash
   // 2. in the plugin, read the entry ourselves as virtual files to retain the
   //    path.
+  // esbuild 以最低共同祖先为基础生成嵌套目录输出。
+  // 这是很难预测的，而且很难分析入口/输出
+  // 映射。因此，我们要做的是
+  // 1. 将所有 id 扁平化，以消除斜线；
+  // 2. 在插件中，以虚拟文件的形式读取条目，以保留条目
+  // 路径。
   const flatIdDeps: Record<string, string> = {}
   const idToExports: Record<string, ExportsData> = {}
-
+  // 读取用户配置项
   const optimizeDeps = getDepOptimizationConfig(config, ssr)
 
   const { plugins: pluginsFromConfig = [], ...esbuildOptions } =
     optimizeDeps?.esbuildOptions ?? {}
 
   await Promise.all(
+    // 处理扫描出来的依赖信息
     Object.keys(depsInfo).map(async (id) => {
       const src = depsInfo[id].src!
+      // 利用es-module-lexer搞出文件import和export信息
       const exportsData = await (depsInfo[id].exportsData ??
         extractExportsData(src, config, ssr))
       if (exportsData.jsxLoader && !esbuildOptions.loader?.['.js']) {
         // Ensure that optimization won't fail by defaulting '.js' to the JSX parser.
         // This is useful for packages such as Gatsby.
+        // 通过将'.js'默认为 JSX 解析器，确保优化不会失败。
+        // 这对 Gatsby 等软件包非常有用。
         esbuildOptions.loader = {
           '.js': 'jsx',
           ...esbuildOptions.loader,
         }
       }
+      // 将模块路径扁平化
       const flatId = flattenId(id)
       flatIdDeps[flatId] = src
       idToExports[id] = exportsData
@@ -783,41 +795,45 @@ async function prepareEsbuildOptimizerRun(
     }
   }
 
+  // 引入用户配置文件中的插件（如果有）
   const plugins = [...pluginsFromConfig]
   if (external.length) {
     plugins.push(esbuildCjsExternalPlugin(external, platform))
   }
+  // 处理依赖pure import模块 等等
   plugins.push(esbuildDepPlugin(flatIdDeps, external, config, ssr))
 
   const context = await esbuild.context({
-    absWorkingDir: process.cwd(),
-    entryPoints: Object.keys(flatIdDeps),
-    bundle: true,
+    absWorkingDir: process.cwd(), // 工作目录的绝对路径
+    entryPoints: Object.keys(flatIdDeps), // 入口点数组
+    bundle: true, // 布尔值，表示是否将所有的模块打包到一个文件中。
     // We can't use platform 'neutral', as esbuild has custom handling
     // when the platform is 'node' or 'browser' that can't be emulated
     // by using mainFields and conditions
-    platform,
-    define,
-    format: 'esm',
+    platform, // 目标平台，可以是 'browser' 或 'node'。
+    define, // 一个对象，用于定义全局常量。
+    format: 'esm', // 输出格式，可以是 'iife'、'cjs'、'esm' 等。
     // See https://github.com/evanw/esbuild/issues/1921#issuecomment-1152991694
+    // 一个字符串或者一个对象，用于在打包文件的顶部添加一段代码。
     banner:
       platform === 'node'
         ? {
             js: `import { createRequire } from 'module';const require = createRequire(import.meta.url);`,
           }
         : undefined,
-    target: isBuild ? config.build.target || undefined : ESBUILD_MODULES_TARGET,
-    external,
-    logLevel: 'error',
-    splitting: true,
-    sourcemap: true,
-    outdir: processingCacheDir,
-    ignoreAnnotations: !isBuild,
-    metafile: true,
-    plugins,
-    charset: 'utf8',
+    target: isBuild ? config.build.target || undefined : ESBUILD_MODULES_TARGET, // 目标版本，例如 'es2015'。
+    external, // 数组，包含了那些不应该被打包的模块。
+    logLevel: 'error', // 日志级别，可以是 'silent'、'warning'、'error' 或 'info'。
+    splitting: true, // 布尔值，表示是否启用代码分割。
+    sourcemap: true, // 布尔值或者字符串，表示是否生成源映射。
+    outdir: processingCacheDir, // 输出目录的路径。
+    ignoreAnnotations: !isBuild, // 布尔值，表示是否忽略注解
+    metafile: true, // 布尔值，表示是否生成元文件。
+    plugins, // 插件数组，用于扩展 esbuild 的功能。
+    charset: 'utf8', // 输入和输出文件的字符集，默认是 'utf8'。
     ...esbuildOptions,
     supported: {
+      // 对象，表示支持的特性。
       'dynamic-import': true,
       'import-meta': true,
       ...esbuildOptions.supported,
@@ -1100,6 +1116,9 @@ export async function extractExportsData(
     // For custom supported extensions, build the entry file to transform it into JS,
     // and then parse with es-module-lexer. Note that the `bundle` option is not `true`,
     // so only the entry file is being transformed.
+    // 对于自定义支持的扩展，构建入口文件以将其转换为 JS、
+    // 然后使用 es-module-lexer 进行解析。注意`bundle`选项不是`true`、
+    // 因此只有入口文件会被转换。
     const result = await build({
       ...esbuildOptions,
       entryPoints: [filePath],

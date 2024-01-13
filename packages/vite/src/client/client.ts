@@ -158,7 +158,7 @@ async function handleMessage(payload: HMRPayload) {
       }, __HMR_TIMEOUT__)
       break
     case 'update':
-      notifyListeners('vite:beforeUpdate', payload)
+      notifyListeners('vite:beforeUpdate', payload) // vite:beforeUpdate热更新的特定钩子
       // if this is the first update and there's already an error overlay, it
       // means the page opened with existing server compile error and the whole
       // module script failed to load (since one of the nested imports is 500).
@@ -431,12 +431,12 @@ export function removeStyle(id: string): void {
 }
 
 async function fetchUpdate({
-  path,
+  path, // accept热更新的模块
   acceptedPath,
   timestamp,
   explicitImportRequired,
 }: Update) {
-  const mod = hotModulesMap.get(path)
+  const mod = hotModulesMap.get(path) // 通过accept API 收集的监听依赖模块列表和回调
   if (!mod) {
     // In a code-splitting project,
     // it is common that the hot-updating module is not loaded yet.
@@ -445,9 +445,10 @@ async function fetchUpdate({
   }
 
   let fetchedModule: ModuleNamespace | undefined
-  const isSelfUpdate = path === acceptedPath
+  const isSelfUpdate = path === acceptedPath // 依赖自身
 
   // determine the qualified callbacks before we re-import the modules
+  // 在重新导入模块之前，确定回调
   const qualifiedCallbacks = mod.callbacks.filter(({ deps }) =>
     deps.includes(acceptedPath),
   )

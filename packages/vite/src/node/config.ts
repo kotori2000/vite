@@ -603,6 +603,8 @@ export async function resolveConfig(
 
   // create an internal resolver to be used in special scenarios, e.g.
   // optimizer & handling css @imports
+  // 创建一个内部解析器，用于特殊情况，例如
+  // 优化器和处理 css @imports
   const createResolver: ResolvedConfig['createResolver'] = (options) => {
     let aliasContainer: PluginContainer | undefined
     let resolverContainer: PluginContainer | undefined

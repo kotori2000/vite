@@ -47,7 +47,9 @@ const externalTypes = [
   ...KNOWN_ASSET_TYPES,
 ]
 
+// 处理依赖打包的esbuild插件
 export function esbuildDepPlugin(
+  // qualified扫描出来依赖的扁平化名称和src属性的映射集合
   qualified: Record<string, string>,
   external: string[],
   config: ResolvedConfig,
@@ -66,6 +68,8 @@ export function esbuildDepPlugin(
   const cjsPackageCache: PackageCache = new Map()
 
   // default resolver which prefers ESM
+  // createResolver是在处理config配置时调用的pluginContain的resolveId钩子
+  // ESM 的路径查找函数
   const _resolve = config.createResolver({
     asSrc: false,
     scan: true,
@@ -73,6 +77,7 @@ export function esbuildDepPlugin(
   })
 
   // cjs resolver that prefers Node
+  // CommonJS 的路径查找函数
   const _resolveRequire = config.createResolver({
     asSrc: false,
     isRequire: true,
@@ -81,9 +86,9 @@ export function esbuildDepPlugin(
   })
 
   const resolve = (
-    id: string,
-    importer: string,
-    kind: ImportKind,
+    id: string, // 当前文件
+    importer: string, // 导入该文件的文件地址，绝对路径
+    kind: ImportKind, // 导入类型
     resolveDir?: string,
   ): Promise<string | undefined> => {
     let _importer: string
@@ -92,10 +97,13 @@ export function esbuildDepPlugin(
     if (resolveDir) {
       _importer = normalizePath(path.join(resolveDir, '*'))
     } else {
-      // map importer ids to file paths for correct resolution
+      // importer 表示导入该文件的文件
+      // 如果 importer 在 qualified 中存在则设置对应文件路径，反之设置 importer
       _importer = importer in qualified ? qualified[importer] : importer
     }
+    // kind为esbuild resolve钩子的第三个参数（导入方式，如 import、require）
     const resolver = kind.startsWith('require') ? _resolveRequire : _resolve
+    // 根据不同模块类型返回不同的路径查找函数
     return resolver(id, _importer, undefined, ssr)
   }
 
@@ -130,6 +138,7 @@ export function esbuildDepPlugin(
     name: 'vite:dep-pre-bundle',
     setup(build) {
       // clear package cache when esbuild is finished
+      // 清除依赖构建缓存
       build.onEnd(() => {
         esmPackageCache.clear()
         cjsPackageCache.clear()
@@ -137,7 +146,10 @@ export function esbuildDepPlugin(
 
       // externalize assets and commonly known non-js file types
       // See #8459 for more details about this require-import conversion
+      // 外部化静态资源和常见的非 JavaScript 文件类型
+      // 有关这种 require-import 转换的更多详情，请参见 #8459
       build.onResolve(
+        // 解决 #8459问题
         {
           filter: new RegExp(
             `\\.(` + allExternalTypes.join('|') + `)(\\?.*)?$`,
@@ -145,6 +157,7 @@ export function esbuildDepPlugin(
         },
         async ({ path: id, importer, kind }) => {
           // if the prefix exist, it is already converted to `import`, so set `external: true`
+          // 如果存在前缀，则已转换为 `import`，因此设置 `external: true`.
           if (id.startsWith(convertedExternalPrefix)) {
             return {
               path: id.slice(convertedExternalPrefix.length),
@@ -172,6 +185,7 @@ export function esbuildDepPlugin(
         { filter: /./, namespace: externalWithConversionNamespace },
         (args) => {
           // import itself with prefix (this is the actual part of require-import conversion)
+          // 如果存在前缀，则已转换为 `import`，因此设置 `external: true`.
           const modulePath = `"${convertedExternalPrefix}${args.path}"`
           return {
             contents:
@@ -207,8 +221,10 @@ export function esbuildDepPlugin(
           let entry: { path: string } | undefined
           // if this is an entry, return entry namespace resolve result
           if (!importer) {
+            // 如果没有 importer 说明是入口文件
+            // 调用 resolveEntry 方法，如果有返回值直接返回
             if ((entry = resolveEntry(id))) return entry
-            // check if this is aliased to an entry - also return entry namespace
+            // 入口文件可能带有别名，去掉别名之后再调用 resolveEntry 方法
             const aliased = await _resolve(id, undefined, true)
             if (aliased && (entry = resolveEntry(aliased))) {
               return entry
@@ -223,6 +239,7 @@ export function esbuildDepPlugin(
         },
       )
 
+      // 插件的resolve返回browser-external，这个模块需要作为一个外部依赖处理，即它不应该被打包，而是在运行时通过 <script> 标签从 CDN 或其他地方加载。
       build.onLoad(
         { filter: /.*/, namespace: 'browser-external' },
         ({ path }) => {
@@ -248,6 +265,22 @@ export function esbuildDepPlugin(
               // the returned object is a Proxy that we can intercept.
               //
               // Note: Skip keys that are accessed by esbuild and browser devtools.
+              // 返回 CJS 以拦截命名的导入。使用 `Object.create` 来
+              // 在原型中创建代理，以解决 esbuild 问题。为什么？
+              //
+              // 简而言之，esbuild cjs->esm 流程：
+              // 1.使用 `Object.create(Object.getPrototypeOf(module.exports))` 创建空对象。
+              // 2.将 `module.exports` 的道具分配给对象。
+              // 3.返回对象供 ESM 使用。
+              //
+              // 如果我们执行 `module.exports = new Proxy({}, {})`，第 1 步将返回空对象、
+              // 第 2 步什么也不做，因为 `module.exports` 没有道具。最终对象
+              // 只是一个空对象。
+              //
+              // 在原型中创建代理立即满足了步骤 1，这意味着
+              // 返回的对象是一个我们可以截取的代理。
+              //
+              // 注意：跳过由 esbuild 和浏览器 devtools 访问的键。
               contents: `\
 module.exports = Object.create(new Proxy({}, {
   get(_, key) {

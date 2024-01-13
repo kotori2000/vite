@@ -94,6 +94,12 @@ export function transformRequest(
 
           // First request has been invalidated, abort it to clear the cache,
           // then perform a new doTransform.
+          // 模块 A 请求 1（pending.timestamp）
+          // 模块 A 失效（module.lastInvalidationTimestamp）
+          // 模块 A 的请求 2（时间戳）
+
+          // 第一个请求已失效，终止请求以清除缓存、
+          // 然后执行新的 doTransform。
           pending.abort()
           return transformRequest(url, server, options)
         }
@@ -111,7 +117,7 @@ export function transformRequest(
     }
   }
 
-  // Cache the request and clear it once processing is done
+  // 缓存请求，并在处理完成后将其清除
   server._pendingRequests.set(cacheKey, {
     request,
     timestamp,
@@ -170,6 +176,7 @@ async function doTransform(
     resolved,
   )
 
+  // 延迟依赖优化器的运行，等待 id 出现，然后再进行优化。
   getDepsOptimizer(config, ssr)?.delayDepsOptimizerUntil(id, () => result)
 
   return result
@@ -204,11 +211,11 @@ async function loadAndTransform(
     if (options.html && !id.endsWith('.html')) {
       return null
     }
-    // try fallback loading it from fs as string
-    // if the file is a binary, there should be a plugin that already loaded it
-    // as string
-    // only try the fallback if access is allowed, skip for out of root url
-    // like /service-worker.js or /api/users
+    //  isFileServingAllowed 方法 首先，检查是否执行了严格的文件系统（fs）策略。如果没有执行严格的fs策略，那么允许访问。
+    //  然后，将URL标准化为绝对路径。
+    //  接着，检查文件是否在deny拒绝名单中。如果在deny拒绝名单中，那么不允许访问。
+    //  然后，检查文件是否为项目中使用到的文件。如果是项目中使用到的文件，那么允许访问。
+    //  最后，检查文件是否在allow名单中。如果在allow名单中，那么允许访问。
     if (options.ssr || isFileServingAllowed(file, server)) {
       try {
         code = await fsp.readFile(file, 'utf-8')
@@ -221,6 +228,7 @@ async function loadAndTransform(
           throw e
         }
       }
+      // ensureWatchedFile确保文件被监视。
       ensureWatchedFile(server.watcher, file, config.root)
     }
     if (code) {
@@ -308,6 +316,7 @@ async function loadAndTransform(
     normalizedMap = null
   }
 
+  // 处理源代码映射逻辑
   if (normalizedMap && 'version' in normalizedMap && mod.file) {
     if (normalizedMap.mappings) {
       await injectSourcesContent(normalizedMap, mod.file, logger)

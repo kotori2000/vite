@@ -30,6 +30,9 @@ async function warmupFile(server: ViteDevServer, file: string, ssr: boolean) {
   // transform html with the `transformIndexHtml` hook as Vite internals would
   // pre-transform the imported JS modules linked. this may cause `transformIndexHtml`
   // plugins to be executed twice, but that's probably fine.
+  // 使用 `transformIndexHtml` 钩子转换 HTML，因为 Vite 内部将
+  // 这可能会导致 `transformIndexHtml`.
+  // 插件执行两次，但这并无大碍。
   if (file.endsWith('.html')) {
     const url = htmlFileToUrl(file, server.config.root)
     if (url) {

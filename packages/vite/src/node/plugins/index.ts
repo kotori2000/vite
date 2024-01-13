@@ -76,6 +76,7 @@ export async function resolvePlugins(
     htmlInlineProxyPlugin(config),
     cssPlugin(config),
     config.esbuild !== false ? esbuildPlugin(config) : null,
+    // 支持`.json`的加载(json转esm)，并配合`rollup`的`Tree Shaking`机制去掉未使用的部分，进行按需打包
     jsonPlugin(
       {
         namedExports: true,

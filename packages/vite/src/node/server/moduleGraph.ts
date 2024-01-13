@@ -23,17 +23,22 @@ export class ModuleNode {
   type: 'js' | 'css'
   info?: ModuleInfo
   meta?: Record<string, any>
+  // 当前模块被哪些模块引用
   importers = new Set<ModuleNode>()
   clientImportedModules = new Set<ModuleNode>()
   ssrImportedModules = new Set<ModuleNode>()
+  // 接受哪些模块的更新
   acceptedHmrDeps = new Set<ModuleNode>()
   acceptedHmrExports: Set<string> | null = null
   importedBindings: Map<string, Set<string>> | null = null
+  // 是否接受自身的更新
   isSelfAccepting?: boolean
+  // transfrom钩子编译后的结果
   transformResult: TransformResult | null = null
   ssrTransformResult: TransformResult | null = null
   ssrModule: Record<string, any> | null = null
   ssrError: Error | null = null
+  // 上次热更新时间戳
   lastHMRTimestamp = 0
   lastInvalidationTimestamp = 0
   /**
@@ -70,6 +75,7 @@ export class ModuleNode {
     }
   }
 
+  // 当前模块依赖哪些模块
   get importedModules(): Set<ModuleNode> {
     const importedModules = new Set(this.clientImportedModules)
     for (const module of this.ssrImportedModules) {
@@ -86,8 +92,11 @@ export type ResolvedUrl = [
 ]
 
 export class ModuleGraph {
+  // 由原始请求 url 到模块节点的映射，如 /src/index.tsx
   urlToModuleMap = new Map<string, ModuleNode>()
+  // 由模块 id 到模块节点的映射，其中 id 与原始请求 url，为经过 resolveId 钩子解析后的结果
   idToModuleMap = new Map<string, ModuleNode>()
+  // 由文件到模块节点的映射，由于单文件可能包含多个模块，如 .vue 文件，因此 Map 的 value 值为一个集合
   // a single file may corresponds to multiple modules with different queries
   fileToModulesMap = new Map<string, Set<ModuleNode>>()
   safeModulesPath = new Set<string>()
@@ -157,22 +166,16 @@ export class ModuleGraph {
   ): void {
     const prevInvalidationState = mod.invalidationState
     const prevSsrInvalidationState = mod.ssrInvalidationState
-
-    // Handle soft invalidation before the `seen` check, as consecutive soft/hard invalidations can
-    // cause the final soft invalidation state to be different.
-    // If soft invalidated, save the previous `transformResult` so that we can reuse and transform the
-    // import timestamps only in `transformRequest`. If there's no previous `transformResult`, hard invalidate it.
     if (softInvalidate) {
       mod.invalidationState ??= mod.transformResult ?? 'HARD_INVALIDATED'
       mod.ssrInvalidationState ??= mod.ssrTransformResult ?? 'HARD_INVALIDATED'
     }
-    // If hard invalidated, further soft invalidations have no effect until it's reset to `undefined`
+    // 硬失效
     else {
       mod.invalidationState = 'HARD_INVALIDATED'
       mod.ssrInvalidationState = 'HARD_INVALIDATED'
     }
-
-    // Skip updating the module if it was already invalidated before and the invalidation state has not changed
+    // 如果模块之前已失效，且失效状态未发生变化，则跳过更新模块
     if (
       seen.has(mod) &&
       prevInvalidationState === mod.invalidationState &&
@@ -181,28 +184,19 @@ export class ModuleGraph {
       return
     }
     seen.add(mod)
-
     if (isHmr) {
       mod.lastHMRTimestamp = timestamp
     } else {
-      // Save the timestamp for this invalidation, so we can avoid caching the result of possible already started
-      // processing being done for this module
+      // 保存此次失效的时间戳，这样我们就可以避免缓存可能已经开始的处理结果。
       mod.lastInvalidationTimestamp = timestamp
     }
-
-    // Don't invalidate mod.info and mod.meta, as they are part of the processing pipeline
-    // Invalidating the transform result is enough to ensure this module is re-processed next time it is requested
+    // 使转换结果无效足以确保下次请求该模块时对其进行重新处理
     mod.transformResult = null
     mod.ssrTransformResult = null
     mod.ssrModule = null
     mod.ssrError = null
-
     mod.importers.forEach((importer) => {
       if (!importer.acceptedHmrDeps.has(mod)) {
-        // If the importer statically imports the current module, we can soft-invalidate the importer
-        // to only update the import timestamps. If it's not statically imported, e.g. watched/glob file,
-        // we can only soft invalidate if the current module was also soft-invalidated. A soft-invalidation
-        // doesn't need to trigger a re-load and re-transform of the importer.
         const shouldSoftInvalidateImporter =
           importer.staticImportedUrls?.has(mod.url) || softInvalidate
         this.invalidateModule(
@@ -246,7 +240,6 @@ export class ModuleGraph {
     mod.isSelfAccepting = isSelfAccepting
     const prevImports = ssr ? mod.ssrImportedModules : mod.clientImportedModules
     let noLongerImported: Set<ModuleNode> | undefined
-
     let resolvePromises = []
     let resolveResults = new Array(importedModules.size)
     let index = 0
@@ -265,11 +258,9 @@ export class ModuleGraph {
         resolveResults[nextIndex] = imported
       }
     }
-
     if (resolvePromises.length) {
       await Promise.all(resolvePromises)
     }
-
     const nextImports = new Set(resolveResults)
     if (ssr) {
       mod.ssrImportedModules = nextImports
@@ -355,13 +346,16 @@ export class ModuleGraph {
       if (!mod) {
         mod = new ModuleNode(url, setIsSelfAccepting)
         if (meta) mod.meta = meta
+        // 注册到模块依赖图中url映射
         this.urlToModuleMap.set(url, mod)
         mod.id = resolvedId
+        // 注册到模块依赖图中id映射
         this.idToModuleMap.set(resolvedId, mod)
         const file = (mod.file = cleanUrl(resolvedId))
         let fileMappedModules = this.fileToModulesMap.get(file)
         if (!fileMappedModules) {
           fileMappedModules = new Set()
+          // 注册到模块依赖图中file映射
           this.fileToModulesMap.set(file, fileMappedModules)
         }
         fileMappedModules.add(mod)

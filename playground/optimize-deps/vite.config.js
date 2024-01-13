@@ -93,6 +93,9 @@ export default defineConfig({
     // TODO: Remove this one support for prebundling in build lands.
     // It is expected that named importing in build doesn't work
     // as it incurs a lot of overhead in build.
+    // TODO： 移除这一项在构建土地中对预捆绑的支持。
+    // 在联编过程中进行命名导入是行不通的。
+    // 因为在构建过程中会产生大量开销。
     {
       name: 'polyfill-named-fs-build',
       apply: 'build',

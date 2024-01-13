@@ -159,8 +159,16 @@ async function createDepsOptimizer(
   // from the first request before resolving to minimize full page reloads.
   // On warm start or after the first optimization is run, we use a simpler
   // debounce strategy each time a new dep is discovered.
+  // 在构建过程中，我们会等待每个模块都被扫描一遍，然后再解决问题。
+  // 每次重建时，我们都会为卷积加载优化过的 deps。它将在
+  // 在每次构建开始后。
+  // 在开发过程中，如果是冷运行，我们会等待从第一个请求中发现的静态导入，然后再解析，以减少对静态导入的依赖。
+  // 从第一个请求中发现的静态导入，然后再进行解析，以尽量减少页面重载。
+  // 在热启动或第一次优化运行后，我们会使用更简单的
+  // 每次发现新的 dep 时，我们都会使用更简单的去抖策略。
   let crawlEndFinder: CrawlEndFinder | undefined
   if (isBuild || !cachedMetadata) {
+    // setupOnCrawlEnd 作用是依赖项的预构建优化完成后进行一些操作
     crawlEndFinder = setupOnCrawlEnd(onCrawlEnd)
   }
 
@@ -190,11 +198,14 @@ async function createDepsOptimizer(
 
   if (!cachedMetadata) {
     // Enter processing state until crawl of static imports ends
+    // 进入处理状态，直到静态导入的抓取结束
     currentlyProcessing = true
 
     // Initialize discovered deps with manually added optimizeDeps.include info
+    // 使用手动添加的 optimizeDeps.include 信息初始化已发现的 deps
 
     const deps: Record<string, string> = {}
+    // 这个方法的主要作用是将手动添加到 optimizeDeps.include 配置项中的依赖项添加到优化列表中。这些依赖项添加到 optimizeDeps 配置项的优化列表中，这样在后续的依赖项预构建优化过程中，这些依赖项就会被预构建优化
     await addManuallyIncludedOptimizeDeps(deps, config, ssr)
 
     const discovered = toDiscoveredDependencies(
@@ -215,11 +226,19 @@ async function createDepsOptimizer(
     if (config.optimizeDeps.noDiscovery) {
       // We don't need to scan for dependencies or wait for the static crawl to end
       // Run the first optimization run immediately
+      // 我们不需要扫描依赖关系或等待静态抓取结束
+      // 立即运行第一次优化运行
+
+      // runOptimizer 方法首先会调用 setupOnCrawlEnd 方法，
+      // 设置在依赖项的预构建优化完成后要执行的操作。然后，这个方法会调用 processQueue 方法，
+      // 开始对依赖项进行预构建。在这个过程中，会对每个依赖项调用 _handleSingleFile 方法进行处理。
+      // 最后，当所有的依赖项都被处理完成后，这个方法会返回一个 Promise，表示依赖项的预构建优化过程已经完成
       runOptimizer()
     } else if (!isBuild) {
       // Important, the scanner is dev only
       depsOptimizer.scanProcessing = new Promise((resolve) => {
         // Runs in the background in case blocking high priority tasks
+        // 在阻塞高优先级任务的情况下在后台运行
         ;(async () => {
           try {
             debug?.(colors.green(`scanning for dependencies...`))
@@ -231,6 +250,9 @@ async function createDepsOptimizer(
             // Add these dependencies to the discovered list, as these are currently
             // used by the preAliasPlugin to support aliased and optimized deps.
             // This is also used by the CJS externalization heuristics in legacy mode
+            // 将这些依赖项添加到已发现列表中，因为这些依赖项目前
+            // preAliasPlugin 用于支持别名和优化的 Deps。
+            // 在传统模式下，CJS 外部化启发式方法也会使用这一点。
             for (const id of Object.keys(deps)) {
               if (!metadata.discovered[id]) {
                 addMissingDep(id, deps[id])
@@ -243,6 +265,10 @@ async function createDepsOptimizer(
             // run on the background, but we wait until crawling has ended
             // to decide if we send this result to the browser or we need to
             // do another optimize step
+            // 对于开发，我们在后台运行扫描仪和第一次优化。
+            // 在后台运行，但我们会等到抓取结束后
+            // 决定是否将结果发送到浏览器，还是需要
+            // 进行另一步优化
             optimizationResult = runOptimizeDeps(config, knownDeps)
           } catch (e) {
             logger.error(e.stack || e.message)
@@ -270,11 +296,13 @@ async function createDepsOptimizer(
   function prepareKnownDeps() {
     const knownDeps: Record<string, OptimizedDepInfo> = {}
     // Clone optimized info objects, fileHash, browserHash may be changed for them
+    // 克隆优化的信息对象，文件哈希值和浏览器哈希值可能会改变
     for (const dep of Object.keys(metadata.optimized)) {
       knownDeps[dep] = { ...metadata.optimized[dep] }
     }
     for (const dep of Object.keys(metadata.discovered)) {
       // Clone the discovered info discarding its processing promise
+      // 克隆已发现的信息，丢弃其处理承诺
       const { processing, ...info } = metadata.discovered[dep]
       knownDeps[dep] = info
     }
@@ -293,6 +321,17 @@ async function createDepsOptimizer(
 
     // All deps, previous known and newly discovered are rebundled,
     // respect insertion order to keep the metadata file stable
+    // 成功完成 optimizeDeps 重新运行后，将最终
+    // 在缓存目录中创建所有当前和已发现部署的新捆绑版本，并为其分配新的元数据信息对象。
+    // 在缓存目录中创建新的捆绑版本，并将一个新的元数据信息对象分配给
+    // 分配给 _metadata 的新元数据信息对象。只有当先前的捆绑
+    // 依赖关系发生了变化。
+
+    // 如果重新运行失败，_metadata 将保持不变，当前发现的
+    // 删除，并发布 fullReload
+
+    // 重新捆绑所有依赖项，包括以前的已知依赖项和新发现的依赖项、
+    // 尊重插入顺序以保持元数据文件的稳定
 
     const isRerun = firstRunCalled
     firstRunCalled = true
@@ -567,6 +606,10 @@ async function createDepsOptimizer(
       // the current state of known + missing deps. If its optimizeDeps run
       // doesn't alter the bundled files of previous known dependencies,
       // we don't need a full reload and this browserHash will be kept
+      // 为该缺失依赖项添加一个唯一的 browserHash。
+      // 当前已知 + 缺失依赖项的状态。如果它的 optimizeDeps 运行
+      // 不会改变先前已知依赖项的捆绑文件、
+      // 我们就不需要完全重新加载，这个 browserHash 将被保留。
       browserHash: getDiscoveredBrowserHash(
         metadata.hash,
         depsFromOptimizedDepInfo(metadata.optimized),
@@ -650,6 +693,7 @@ async function createDepsOptimizer(
         result.cancel()
 
         // Add deps found by the scanner to the discovered deps while crawling
+        // 在抓取过程中将扫描仪发现的部署添加到已发现的部署中
         for (const dep of scanDeps) {
           if (!crawlDeps.includes(dep)) {
             addMissingDep(dep, result.metadata.optimized[dep].src!)

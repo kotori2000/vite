@@ -52,6 +52,16 @@ const htmlTypesRE = /\.(html|vue|svelte|astro|imba)$/
 // use Acorn because it's slow. Luckily this doesn't have to be bullet proof
 // since even missed imports can be caught at runtime, and false positives will
 // simply be ignored.
+// 用于检测导入源的简单 regex。仅用于
+// 或 svelte 文件中的 <script lang="ts"> 块，因为
+// 因为在转译 TS 时，esbuild 会丢弃看似未使用的导入，这就
+// 阻止它进一步抓取。
+// 我们不能使用 es-module-lexer 因为它无法处理 TS，也不想
+// 使用 Acorn，因为它很慢。幸运的是，这并不一定要做到万无一失
+// 甚至可以在运行时捕捉到错误的导入。
+// 会被直接忽略。
+
+// 匹配字符串中的所有 import 语句
 export const importsRE =
   /(?<!\/\/.*)(?<=^|;|\*\/)\s*import(?!\s+type)(?:[\w*{}\n\r\t, ]+from)?\s*("[^"]+"|'[^']+')\s*(?=$|;|\/\/|\/\*)/gm
 
@@ -71,6 +81,7 @@ export function scanImports(config: ResolvedConfig): {
 
   const scanContext = { cancelled: false }
 
+  // computeEntries：拿到依赖扫描的入口文件
   const esbuildContext: Promise<BuildContext | undefined> = computeEntries(
     config,
   ).then((computedEntries) => {
@@ -305,6 +316,7 @@ function esbuildScanPlugin(
     external: !entries.includes(path),
   })
 
+  // 转换源代码中模块导入 使得 Vite 以浏览器可以理解的格式提供模块
   const doTransformGlobImport = async (
     contents: string,
     id: string,
@@ -346,9 +358,11 @@ function esbuildScanPlugin(
       }))
 
       // local scripts (`<script>` in Svelte and `<script setup>` in Vue)
+      // 本地脚本（Svelte 中的 `<script>` 和 Vue 中的 `<script setup>`)
       build.onResolve({ filter: virtualModuleRE }, ({ path }) => {
         return {
           // strip prefix to get valid filesystem path so esbuild can resolve imports in the file
+          // 去掉前缀以获得有效的文件系统路径，这样 esbuild 就能解析文件中的导入内容
           path: path.replace(virtualModulePrefix, ''),
           namespace: 'script',
         }
@@ -365,6 +379,9 @@ function esbuildScanPlugin(
         // It is possible for the scanner to scan html types in node_modules.
         // If we can optimize this html type, skip it so it's handled by the
         // bare import resolve, and recorded as optimization dep.
+        // 扫描器有可能扫描 node_modules 中的 html 类型。
+        // 如果我们可以优化该 html 类型，就跳过它，使其由
+        // 裸导入解析处理，并记录为优化 dep。
         if (
           isInNodeModules(resolved) &&
           isOptimizable(resolved, config.optimizeDeps)
@@ -429,6 +446,14 @@ function esbuildScanPlugin(
 
             // append imports in TS to prevent esbuild from removing them
             // since they may be used in the template
+            // 需要虚拟模块的原因
+            // 1. 可以有模块脚本（Svelte 中的 `<script context="module">` 和 Vue 中的 `<script>`）， // 也可以有本地脚本（Svelte 中的 `<script>`和 Vue 中的 `<scriptsetup>`）。
+            // 或本地脚本（Svelte 中的 `<script>` 和 Vue 中的 `<script setup>`)
+            // html 中可能有多个模块脚本
+            // 我们需要单独处理这些脚本，以防它们之间重复使用变量名。
+
+            // 在 TS 中添加导入，以防止 esbuild 删除它们
+            // 因为它们可能会在模板中使用
             const contents =
               content +
               (loader.startsWith('ts') ? extractImportPaths(content) : '')
@@ -476,6 +501,10 @@ function esbuildScanPlugin(
         // anywhere in a string. Svelte and Astro files can't have
         // `export default` as code so we know if it's encountered it's a
         // false positive (e.g. contained in a string)
+        // 如果字符串中的任何地方包含 `export default` 字样，此操作将错误触发。
+        // 在字符串中的任何位置，此操作将错误触发。Svelte 和 Astro 文件不能将
+        // `export default` 作为代码，这样我们就能知道如果遇到它是一个
+        // 假阳性（例如包含在字符串中）
         if (!p.endsWith('.vue') || !js.includes('export default')) {
           js += '\nexport default {}'
         }
@@ -487,12 +516,16 @@ function esbuildScanPlugin(
       }
 
       // extract scripts inside HTML-like files and treat it as a js module
+      // 提取 HTML 类文件中的脚本并将其视为 js 模块
       build.onLoad(
         { filter: htmlTypesRE, namespace: 'html' },
         htmlTypeOnLoadCallback,
       )
       // the onResolve above will use namespace=html but esbuild doesn't
       // call onResolve for glob imports and those will use namespace=file
+      // https://github.com/evanw/esbuild/issues/3317
+      // 上面的 onResolve 会使用 namespace=html，但 esbuild 不会这样做
+      // 为 glob 导入调用 onResolve，这些导入将使用 namespace=file
       // https://github.com/evanw/esbuild/issues/3317
       build.onLoad(
         { filter: htmlTypesRE, namespace: 'file' },
@@ -506,9 +539,11 @@ function esbuildScanPlugin(
           filter: /^[\w@][^:]/,
         },
         async ({ path: id, importer, pluginData }) => {
+          // config中指定为exclude或者是内置了别名的模块（client || env）
           if (moduleListContains(exclude, id)) {
             return externalUnlessEntry({ path: id })
           }
+          // 如果被添加到依赖扫描的列表中，直接external
           if (depImports[id]) {
             return externalUnlessEntry({ path: id })
           }
@@ -519,14 +554,17 @@ function esbuildScanPlugin(
           })
           if (resolved) {
             if (shouldExternalizeDep(resolved, id)) {
+              // 不是有效的文件路径或者是虚拟模块
               return externalUnlessEntry({ path: id })
             }
+            // 路径解析完后有node_modules || 预构建配置中指定包含的模块
             if (isInNodeModules(resolved) || include?.includes(id)) {
               // dependency or forced included, externalize and stop crawling
               if (isOptimizable(resolved, config.optimizeDeps)) {
                 depImports[id] = resolved
               }
               return externalUnlessEntry({ path: id })
+              // isScannable检查给定的模块是否可以被扫描和优化（j(t)s(x)|html|vue|svelte|astro|imba等文件都可以支持扫描）
             } else if (isScannable(resolved, config.optimizeDeps.extensions)) {
               const namespace = htmlTypesRE.test(resolved) ? 'html' : undefined
               // linked package, keep crawling
@@ -641,6 +679,11 @@ function esbuildScanPlugin(
  * esbuild from crawling further.
  * the solution is to add `import 'x'` for every source to force
  * esbuild to keep crawling due to potential side effects.
+ * * 当使用 TS + (Vue + `<script setup>`) 或 Svelte 时，导入可能看起来
+ * 未被 esbuild 使用，并被丢弃在构建输出中，从而阻止了
+ * esbuild 无法进一步抓取。
+ * 解决方法是为每个源代码添加 `import 'x'`，以强制
+ * 由于潜在的副作用，esbuild 会继续抓取。
  */
 function extractImportPaths(code: string) {
   // empty singleline & multiline comments to avoid matching comments
@@ -659,6 +702,7 @@ function extractImportPaths(code: string) {
 
 function shouldExternalizeDep(resolvedId: string, rawId: string): boolean {
   // not a valid file path
+  // 不是有效的文件路径
   if (!path.isAbsolute(resolvedId)) {
     return true
   }

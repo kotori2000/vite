@@ -179,6 +179,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
 
   let _env: string | undefined
   let _ssrEnv: string | undefined
+  // 注入环境变量上下文
   function getEnv(ssr: boolean) {
     if (!_ssrEnv || !_env) {
       const importMetaEnvKeys: Record<string, any> = {}
@@ -226,7 +227,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       }
 
       const start = performance.now()
-      await init
+      await init // es-module-lexer init
       let imports!: readonly ImportSpecifier[]
       let exports!: readonly ExportSpecifier[]
       source = stripBomTag(source)
@@ -246,6 +247,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       const { moduleGraph } = server
       // since we are already in the transform phase of the importer, it must
       // have been loaded so its entry is guaranteed in the module graph.
+      // 当前模块
       const importerModule = moduleGraph.getModuleById(importer)!
       if (!importerModule) {
         // This request is no longer valid. It could happen for optimized deps
@@ -276,6 +278,10 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       const toAbsoluteUrl = (url: string) =>
         path.posix.resolve(path.posix.dirname(importerModule.url), url)
 
+      // normalizeUrl 方法：规范化 URL
+      // 首先，normalizeUrl 函数会解析 URL，将其转换为一个标准的 URL 对象。
+      // 然后，normalizeUrl 函数会处理 URL 对象的各个部分，包括路径、查询参数、片段等。在处理查询参数时，normalizeUrl 函数会保留所有的查询参数，并将它们作为处理后的 URL 的一部分。
+      // 最后，normalizeUrl 函数会将处理后的 URL 对象转换回字符串，并返回这个字符串。返回的字符串是处理后的 URL，包含了原始 URL 中的所有查询参数。
       const normalizeUrl = async (
         url: string,
         pos: number,
@@ -448,6 +454,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                   const importAcceptedUrls = (orderedAcceptedUrls[index] =
                     new Set<UrlPosition>())
                   if (
+                    // lexAcceptedHmrDeps方法主要是判断accept调用参数是否合法，校验合法性
                     lexAcceptedHmrDeps(
                       source,
                       source.indexOf('(', endHot + 7) + 1,
@@ -462,6 +469,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
               hasEnv = true
             }
             return
+            // templateLiteralRE匹配模板字符串的正则
           } else if (templateLiteralRE.test(rawUrl)) {
             // If the import has backticks but isn't transformed as a glob import
             // (as there's nothing to glob), check if it's simply a plain string.
@@ -471,7 +479,6 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
               specifier = rawUrl.replace(templateLiteralRE, '$1')
             }
           }
-
           const isDynamicImport = dynamicIndex > -1
 
           // strip import attributes as we can process them ourselves
@@ -689,6 +696,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
 
       if (hasEnv && !isClassicWorker) {
         // inject import.meta.env
+        // 把环境变量注入import.meta.env
         str().prepend(getEnv(ssr))
       }
 
